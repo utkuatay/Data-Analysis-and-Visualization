@@ -1,0 +1,377 @@
+---
+title: "Data Analysis and Visualization in R (IN2339)"
+subtitle: "Case Study"
+author: "[Esra Yucal, Navin Kumar Trivedi, Utku Atay, Vinit Kumar]"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+  
+---
+
+## Motivation
+
+The motivation of this case study is to find an underlying reason for the stagnant population of the City of Barcelona even with an increasing number of deaths as compared to births in the corresponding years. 
+The goal of this case study is to deep dive into the provided data, finding a proper explanation for the same. 
+
+## Data Preparation
+
+In this section, we perform the needed data preparation steps needed for the analysis. Unnecessary chunk codes are omitted in the compiled pdf-file. Firstly, we load some libraries, then read the csv files and examine each relevant file one by one.
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+## Load all the needed libraries. No need to include this in your compiled pdf document so we set echo=FALSE
+library(data.table)
+library(ggplot2)
+library(tidyr)
+library(tidyverse)
+library(reshape2)
+library(scales)
+library(magrittr) # Needed for %>% operator
+library(ggrepel) ## for text labeling 
+library(GGally) ## for SCATTERPLOT MATRIX 
+library(knitr)
+
+```
+
+```{r, echo=FALSE,results='hide'}
+# clear workspace
+rm(list=ls())
+# getting the current WD
+getwd()
+```
+
+```{r, echo=FALSE, results='hide'}
+
+# Load the file(s)
+births <- fread('data/births.csv')
+deaths <- fread('data/deaths.csv')
+life_exp <- fread('data/life_expectancy.csv')
+pop <- fread('data/population.csv')
+
+
+immigrants_emigrants_by_sex <- fread('data/immigrants_emigrants_by_sex.csv') ### IMMIGRANTS & EMIGRANTS BY GENDER 
+immigrants_by_nationality <- fread('data/immigrants_by_nationality.csv') ### IMMIGRANTS & EMIGRANTS BY NATIONALITYS 
+immigrants_emigrants_by_destination2 <- fread('data/immigrants_emigrants_by_destination2.csv') ###  IMMIGRANTS & EMIGRANTS BY PLACE OF ORIGIN AND DESTINATION2 
+
+glimpse(births)
+#View(births)
+glimpse(deaths)
+#View(deaths)
+glimpse(life_exp)
+#View(life_exp)
+glimpse(pop)
+#View(pop)
+glimpse(immigrants_emigrants_by_sex)
+#View(immigrants_emigrants_by_sex)
+glimpse(immigrants_by_nationality)
+#View(immigrants_by_nationality)
+glimpse(immigrants_emigrants_by_destination2)
+#View(immigrants_emigrants_by_destination2)
+
+```
+After that, we try to tidy data in order to work with them more clearly. "Births", "Immigration by Sex" and "Immigration by Nationality" datasets have improper colnames like "District Name", because they have spaces in the column names. We changed the columns by using "make.names" function and convert them appropiate names like "District.Name" We change "Neighbor.Code" and "District.Code" variables from integer to factor for all files. Additionally "Year" data is also given in integer, therefore we change it also into factor because data includes a certain number of years. Finally, we tidy and manipulate data with functions like melt and cast. We continue to use these manipulation techniques when necessary in the Data Analysis section.
+```{r, echo=FALSE, results='hide'}
+colnames(births) <- make.names(colnames(births), unique = TRUE)
+colnames(immigrants_emigrants_by_sex) <- make.names(colnames(immigrants_emigrants_by_sex), unique = TRUE)
+colnames(immigrants_by_nationality) <- make.names(colnames(immigrants_by_nationality), unique = TRUE)
+
+pop$District.Code <- as.factor(pop$District.Code)
+pop$Neighborhood.Code <- as.factor(pop$Neighborhood.Code)
+pop$Year <- as.factor(pop$Year)
+pop$Gender <- as.factor(pop$Gender)
+
+colnames(births) <- make.names(colnames(births), unique = TRUE)
+births$District.Code <- as.factor(births$District.Code)
+births$Neighborhood.Code <- as.factor(births$Neighborhood.Code)
+births$Year <- as.factor(births$Year)
+births$Gender <- as.factor(births$Gender)
+levels(births$Gender)[1] <- "Male"
+levels(births$Gender)[2] <- "Female"
+
+deaths$District.Code <- as.factor(deaths$District.Code)
+deaths$Neighborhood.Code <- as.factor(deaths$Neighborhood.Code)
+deaths$Year <- as.factor(deaths$Year)
+deaths$Age <- as.factor(deaths$Age)
+
+immigrants_emigrants_by_sex_tidy <- melt(immigrants_emigrants_by_sex,
+                                         measure.vars = c("Immigrants","Emigrants"), 
+                                         variable.name = "Immigrants/Emigrants", na.rm=TRUE)
+
+### Immigrants and emigrants by place of origin and destination (2017)
+#unique(immigrants_emigrants_by_destination2$from)
+
+## The city of Barcelona consists of 10 districts:  
+  # 1-  Ciutat Vella 
+  # 2-  Eixample
+  # 3-  Gràcia
+  # 4-  Horta-Guinardó
+  # 5-  Les Corts
+  # 6-  Nou Barris
+  # 7-  Sant Andreu
+  # 8-  Sant Martí
+  # 9-  Sants-Montjuïc
+  # 10- Sarrià-Sant Gervasi
+
+immigrants_by_neighborhoods <- immigrants_emigrants_by_destination2[ to %in% c("Ciutat Vella", "Eixample", "Gràcia", "Horta-Guinardó",
+                                                                               "Les Corts", "Nou Barris", "Sant Andreu", "Sant Martí",
+                                                                               "Sants-Montjuïc", "Sarrià-Sant Gervasi"),]
+
+
+### ANALYSIS BY IMMIGRANTS NATIONALITIES 
+## First we check all nationalities of immigrants 
+## There are 177 different nationality total 
+
+#unique(immigrants_by_nationality$Nationality)
+
+# we removed the immigrants from Spain 
+dt<- immigrants_by_nationality[Nationality!="Spain",] 
+
+number_by_nationality <- aggregate(c(dt$Number), by=list(c(Nationality=dt$Nationality)), FUN=sum) %>%
+  arrange(desc(x)) %>%
+  slice(1:10) 
+
+number_by_nationality ##we check the top 10 nationality who immigrate to Barcelona 
+
+## "Italy", "Pakistan", "China", "Colombia","France",
+## "Honduras", "Venezuela", "Morocco", "Peru", "Brasil"
+
+y <- number_by_nationality[,"Group.1"]
+
+```
+## Data Analysis
+
+### Population by Year & Gender
+
+Initially, we start with the population dataset and show the population of Barcelona by Gender and Year from 2013-2017. The population increases slightly in recent years. The portion of female and male in the population remained almost the same. Female's percentage is somewhat more then male's one.
+```{r, echo=FALSE, warning=FALSE, message=FALSE, fig.height= 3 , fig.width= 5}
+pop <- as.data.table(pop)
+#pop[, .(sum(Number)), by= "Year"]
+
+new_pop <- pop %>% group_by(Year, Gender) %>% summarise(Population = sum(Number))
+#View(new_pop)
+new_pop <- new_pop %>% group_by(Year) %>% mutate(Percentage = sprintf("%0.2f%%",Population /sum(Population) *100))
+#View(new_pop)
+
+colours = c("#ff0000","#6495ed")
+
+
+ggplot(new_pop, aes(x= Year, y= Population, fill = Gender), group_by = c(Year, Gender)) + geom_bar(position ="stack", stat = "identity") + labs( x="Year", y= "Population", title = "Population by year (2013- 2017)") + scale_y_continuous(labels = unit_format(unit = "M", scale =1e-6)) +  geom_text(aes(label = Percentage), position=position_stack(vjust=0.5), colour="black", size =3) + scale_fill_manual(values=colours)+ theme_minimal() +
+theme(axis.text=element_text(size=8), axis.title = element_text(size=9), plot.title=element_text(size=10))
+```
+
+### Population by District & Gender
+
+Afterwards we analyze the district population. Now, we show the population of Barcelona by District and Gender for the Year 2016 and 2017. Eixample and Sant Marti are the most populated districts in Barcelona. The district's population and gender distribution in district are almost same in both years.
+
+```{r,echo=FALSE, warning=FALSE, message=FALSE, fig.height= 4 , fig.width= 8}
+new_pop2 <- pop %>% group_by(District.Name, Gender,Year) %>% summarise(Population = sum(Number))
+new_pop2 <- new_pop2 %>% filter(Year %in% c(2016,2017))
+new_pop2 <- new_pop2 %>% group_by(District.Name, Year) %>% mutate(Percentage = sprintf("%0.1f%%",Population /sum(Population) *100),Total_Pop = sum(Population))  %>%  arrange(desc(Total_Pop))
+#View(new_pop2)
+
+
+ggplot(new_pop2, aes(x= reorder(District.Name,Population), y= Population, fill = Gender), group_by = c(District.Name, Gender)) + geom_bar(position ="stack", stat = "identity") + labs( x="District Name", y= "Population", title = "Population by District (2016 & 2017)") + scale_y_continuous(labels = unit_format(unit = "M", scale =1e-6)) +  geom_text(aes(label = Percentage), position=position_stack(vjust=0.5), colour="black", size =3) + scale_fill_manual(values=colours)+ theme_minimal() + coord_flip() + facet_wrap(~ Year)  +
+theme(axis.text=element_text(size=8), axis.title = element_text(size=10), plot.title=element_text(size=9))
+```
+
+### Growth Rate
+
+As already mentioned above, the population of Barcelona is increasing slightly over years. However when we examine the births and deaths statistics, it could be expected that population is decreasing because the number of deaths is higher than births. The difference between births and deaths is called expected population change while the current population change is named real population change. Now we plot those changes over years.
+
+```{r,echo=FALSE, warning=FALSE, message=FALSE,  fig.height= 3 , fig.width= 5}
+####### Growth Rate
+
+pop_group <- pop %>% group_by(Year) %>% summarise(Population = sum(Number))
+#View(pop_group)
+
+births_group <- births %>% group_by(Year) %>% summarise(Births = sum(Number))
+#View(births_group)
+
+deaths_group <- deaths %>% group_by(Year) %>% summarise(Deaths = sum(Number))
+#View(deaths_group)
+
+df_list <- list(pop_group,births_group,deaths_group)
+total_group <- Reduce(function(x, y) merge(x, y, all=TRUE), df_list, accumulate=FALSE)
+#View(total_group)
+
+NA2mean <- function(x) replace(x, is.na(x), mean(x, na.rm = TRUE))
+total_group <- lapply(total_group, NA2mean)
+total_group <- as.data.table(total_group)
+
+total_group <- total_group %>% mutate(Pop_Diff = c(0,diff(Population)), Natural_Diff = Births- Deaths)
+
+total_group$Natural_Diff[1] <- 0
+
+#colnames(total_group)
+
+total_melt<- melt(total_group, id.vars = c("Year"), measure.vars = c("Population","Births","Deaths","Pop_Diff","Natural_Diff"),
+     variable.name = "Metrics", value.name = "Values")
+#View(total_melt)
+
+target = c("Pop_Diff","Natural_Diff")
+total_melt_subset <- filter(total_melt, Metrics %in% target)
+#View(total_melt_subset)
+
+ggplot(total_melt_subset, aes(x= Year, y= Values, group = Metrics)) + geom_line(aes(colour = Metrics)) + geom_point(aes(colour = Metrics)) + labs( x="Years", y= "Number of People", title = "Expected and Real Population Change ") + scale_color_hue(labels = c("Real Difference", "Expected Difference")) + theme_minimal()  +
+theme(axis.text=element_text(size=8), axis.title = element_text(size=9), plot.title=element_text(size=10))
+```
+
+The graph indicates that real change is greater than expected one, which means there should be another factor, which cause the population increase in Barcelona. Our hypthese is that there is relationship between population increase and immigrants.
+
+### Immigrants by year and gender 
+
+The file "immigrants_emigrants_by_sex.csv" has been used, which contains information about immigration and emigration numbers based on year, gender, district name, neighborhood name, and so on.
+
+```{r,echo=FALSE, warning=FALSE, message=FALSE, fig.height= 3 , fig.width= 5}
+
+immigrants_emigrants_by_sex_tidy %>%
+  group_by(Gender, `Immigrants/Emigrants`, Year) %>%
+  summarise(count=sum(value)) %>%
+  ggplot(aes(x=`Immigrants/Emigrants`, y=count, fill=Gender)) +
+  geom_bar(stat="identity", position="stack") + 
+  facet_grid(~Year) +
+  labs(x= "Immigrants/emigrants", y="total population", title="Immigration & Emigration by Year (2013-2017)") +
+  labs(fill = "Gender")+
+  theme(axis.text.x=element_text(angle=45, hjust=1), axis.text=element_text(size=8), axis.title = element_text(size=9), plot.title=element_text(size=10))
+
+
+
+```
+
+Between the years 2013 and 2017, immigration and emigration were examined, as well as by gender using the geom bar. According to the bar chart, immigration remained relatively stable between 2013 and 2017.However, as the graph shows, immigration has increased significantly since 2013. Furthermore, the majority of the immigrants were female. 
+
+### Immigrants by district and population change in the district 
+
+The file "immigrants_emigrants_by_destination2.csv" was used to investigate the number of people who immigrate to and emigrate from Barcelona, as well as the neighborhoods where they live or move in 2017.  
+After a quick check of data and a search of resources, districts of Barcelona were discovered and used for data separation (filtering) based on immigration and emigration moves. 
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, fig.height= 3 , fig.width= 7}
+require(gridExtra)
+plot1 <- ggplot(immigrants_by_neighborhoods, aes(x=reorder(from, -weight), y=weight )) +
+  geom_bar(stat="identity",fill='steelblue') + 
+  labs(x= "Origin", y ="Population", title ="Immigrants looking by\ntheir origin")+
+  theme(axis.text.x=element_text(angle=45, hjust=1, size = 9), plot.title=element_text(size=9))
+
+plot2 <- ggplot(immigrants_by_neighborhoods, aes(x=reorder(to, -weight), y=weight )) +
+  geom_bar(stat="identity", fill='skyblue') + 
+  labs(x= "Destination", y ="Population", 
+  title = "Immigrants looking by their\ndestination neighborhoods of Barcelona")+ 
+  theme(axis.text.x=element_text(angle=45, hjust=1), axis.text=element_text(size=8), 
+        axis.title =element_text(size=9), plot.title=element_text(size=10))
+
+grid.arrange(plot1, plot2, ncol=2)
+
+# Growth Rate of those districts
+```
+
+The first plot shows the distribution of immigrants based on their origin location, while the second plot shows the distribution of immigrants based on their destination to Barcelona neighborhoods.Vast majority of immigrants are from countries other than Spain.(coming from abroad) The majority of the immigration has been dissolved to the Eixample and Sant Marti neighborhoods of Barcelona. 
+
+### Immigrants by nationality 
+  
+```{r, echo=FALSE, fig.show = 'hide' ,results = 'hide' , warning=FALSE, message=FALSE, fig.height= 3, fig.width= 6}
+### GEOM BAR PLOT OF:  Immigrants by nationality 2015-2017
+
+immigrants_by_nationality[Nationality%in%y,] %>% 
+  group_by(Nationality) %>%
+  summarise(count=sum(Number)) %>%
+  ggplot(aes(x=Nationality, y=count)) +
+  geom_col(aes(fill=count), show.legend=FALSE ) +
+  geom_label(aes(label=count)) +
+  labs(x="Nationality", y="Population", title="Immigrants by nationality 2015-2017")+
+  theme( axis.text=element_text(size=8),
+        axis.title = element_text(size=9), plot.title=element_text(size=10))
+```
+```{r, echo=FALSE, warning=FALSE, message=FALSE, fig.height= 3, fig.width= 6}
+## Distribution of immigrants nationalities based on years (2015-2017)
+X<-immigrants_by_nationality[Nationality%in%y,] %>% 
+  group_by(Year, Nationality) %>%
+  summarise(count=sum(Number)) %>%
+  ggplot(aes(x=Nationality, y=count)) +
+  geom_col(aes(fill=count), show.legend=FALSE ) +
+  geom_label(aes(label=count)) +
+  labs(x="Nationalities",y="Population") + 
+  theme(axis.text.x=element_text(angle=45, hjust=1), axis.text=element_text(size=8), 
+        axis.title =element_text(size=9))
+
+
+X + facet_wrap(~Year)
+
+```
+
+According to the graphs, Italy had the highest rate of immigration. 
+Furthermore, when we look at immigration from countries separately by year, we see that the number of immigrants from other countries does not change much, but immigration from Italy increases every year, and there was a significant increase in 2017. 
+
+### Population change in most immigrated districts
+
+Lastly, we examine the districts, which are the most immigrated. Those are "Eixample","Sant Martí","Sants-Montjuïc" and "Ciutat Vella". The first graph shows that the population in these districts has increased over years. When we compare real and expected population differences in these districts, it can be clearly said that expected difference is much higher than real one, especially in Eixample and Sants-Montjuïc. These graphs also support our claim, which is population is increased only because of immigrants. Our cofounding factors are population increase and number of immigrations. The former is our dependent variable and the latter is the independent variable.
+
+```{r,echo=FALSE, warning=FALSE, message=FALSE, fig.height= 3 , fig.width= 7}
+colours2 = c("#00d8d8", "#008b8b", "#005858") 
+
+
+new_pop4 <- pop %>% filter(Year %in% c(2015,2016,2017))
+new_pop4 <- new_pop4 %>% group_by(District.Name, Year) %>% summarise(Population = sum(Number))
+new_pop4 <- new_pop4%>% group_by(District.Name) %>% mutate(Percentage = sprintf("%0.1f%%",Population /sum(Population) *100),Total_Pop = sum(Population))  %>%  arrange(desc(Total_Pop))
+
+#table(new_pop4$District.Name)
+
+new_pop4_districts <- new_pop4 %>%  filter(District.Name %in% c("Eixample","Sant Martí","Sants-Montjuïc","Ciutat Vella"))
+
+#View(new_pop4_districts)
+
+ggplot(new_pop4_districts, aes(x= reorder(District.Name,Total_Pop), y= Population, fill = Year), group_by = c(District.Name)) + geom_bar(position ="dodge", stat = "identity") + labs( x="District Name", y= "Population", title = "Population by District over Years (2015-2017") + scale_y_continuous(labels = unit_format(unit = "K", scale =1e-3))+ theme_minimal()+ scale_fill_manual(values=colours2) + 
+theme(axis.text.x=element_text(angle=45, hjust=1), axis.text=element_text(size=8), 
+      axis.title =element_text(size=9), plot.title=element_text(size=10))
+
+```
+
+```{r,echo=FALSE, warning=FALSE, message=FALSE, fig.height= 3 , fig.width= 7}
+filtered_pop <- pop %>% filter(District.Name %in% c("Eixample","Sant Martí","Sants-Montjuïc","Ciutat Vella"))
+filtered_births <- births %>% filter(District.Name %in% c("Eixample","Sant Martí","Sants-Montjuïc","Ciutat Vella"))
+filtered_deaths <- deaths %>% filter(District.Name %in% c("Eixample","Sant Martí","Sants-Montjuïc","Ciutat Vella"))
+
+pop_district <- filtered_pop %>% group_by(District.Name, Year) %>% summarise(Population = sum(Number))
+
+births_district <- filtered_births %>% group_by(District.Name, Year) %>% summarise(Births = sum(Number))
+#View(births_group)
+
+deaths_district <- filtered_deaths %>% group_by(District.Name, Year) %>% summarise(Deaths = sum(Number))
+#View(deaths_group)
+
+df_list2 <- list(pop_district,births_district,deaths_district)
+diff_district<- Reduce(function(x, y) merge(x, y, all=TRUE), df_list2, accumulate=FALSE)
+
+NA2mean <- function(x) replace(x, is.na(x), mean(x, na.rm = TRUE))
+diff_district<- lapply((diff_district), NA2mean)
+diff_district <- as.data.table(diff_district)
+
+diff_district <- diff_district %>% group_by(District.Name) %>% mutate(Pop_Diff = c(0,diff(Population)), Natural_Diff = Births- Deaths)
+
+
+diff_district$Natural_Diff <- round(diff_district$Natural_Diff)
+#View(diff_district)
+
+diff_district <- diff_district %>% filter(Year %in% c(2015,2016,2017))
+
+district_melt<- melt(diff_district, id.vars = c("Year", "District.Name"), measure.vars = c("Population","Births","Deaths","Pop_Diff","Natural_Diff"),
+     variable.name = "Metrics", value.name = "Values")
+#View(district_melt)
+
+target = c("Pop_Diff","Natural_Diff")
+district_melt_subset <- filter(district_melt, Metrics %in% target)
+#View(district_melt_subset)
+
+ggplot(district_melt_subset, aes(x= Year, y= Values, group = Metrics)) + 
+  geom_line(aes(colour = Metrics)) + geom_point(aes(colour = Metrics)) +
+  labs( x="Years", y= "Number of People", title = "Expected and Real Population Change by Districts ")  +
+  scale_color_hue(labels = c("Real Difference", "Expected Difference")) + theme_minimal() +
+  facet_wrap(~ District.Name) + theme(axis.text.x=element_text(angle=45, hjust=1),
+  axis.text=element_text(size=8), axis.title =element_text(size=9), plot.title=element_text(size=10))
+
+```
+
+## Conclusion 
+
+Hence, we conclude as shown above that there is a difference between the excepted and the real population change. We attribute this to the Immigrants which explains the stagnant population of Barcelona which otherwise should have decreased if we consider the natural change of birth and death over the years.
+
+We also summarize on the population by district with the most immigrants from which we conclude that Eixample has the largest population with Sants-Montjuïc having the highest gap between the expected and the real population change.
+
